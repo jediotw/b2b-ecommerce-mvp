@@ -1,0 +1,6 @@
+-- V1 baseline migration for the B2B e-commerce MVP.
+--
+-- Intentionally comment-only (as approved in the foundation plan): it gives
+-- Flyway a versioned starting point without creating any schema objects.
+-- Business tables (Product, Customer, Order, Inventory) arrive in later
+-- migrations.

@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: shop
+
+  datasource:
+    # Defaults target the local docker compose database (see compose.yaml).
+    # LOCAL-DEVELOPMENT-ONLY password default; override via POSTGRES_PASSWORD.
+    # SPRING_DATASOURCE_URL overrides the whole URL when set.
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/${POSTGRES_DB:shop}}
+    username: ${POSTGRES_USER:shop}
+    password: ${POSTGRES_PASSWORD:localdev}
+
+  flyway:
+    # Flyway owns schema changes; Hibernate only validates.
+    enabled: true
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Expose only the health endpoint.
+        include: health
+  health:
+    db:
+      # Database health indicator (reports the datasource status).
+      enabled: true
