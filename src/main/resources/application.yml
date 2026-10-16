@@ -19,6 +19,18 @@ spring:
       ddl-auto: validate
     open-in-view: false
 
+  jackson:
+    deserialization:
+      # Jackson 3 defaults FAIL_ON_UNKNOWN_PROPERTIES to disabled and a per-class
+      # @JsonIgnoreProperties(ignoreUnknown = false) cannot re-enable it; enabling
+      # the feature rejects unknown request fields (typos, client-supplied "currency").
+      fail-on-unknown-properties: true
+
+  mvc:
+    problemdetails:
+      # Render framework-level errors (e.g. 405, 415) as RFC 7807 ProblemDetail too.
+      enabled: true
+
 management:
   endpoints:
     web:
@@ -29,3 +41,8 @@ management:
     db:
       # Database health indicator (reports the datasource status).
       enabled: true
+
+shop:
+  catalog:
+    # Single MVP currency; returned on every product response. Clients cannot submit it.
+    currency: INR
