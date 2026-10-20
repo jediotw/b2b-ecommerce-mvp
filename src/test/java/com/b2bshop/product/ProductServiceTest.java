@@ -120,6 +120,24 @@ class ProductServiceTest {
     }
 
     @Test
+    void createRejectsSkuThatExceedsNormalizedLengthLimitWithoutSaving() {
+        // 64 x "ß" (U+00DF) passes @Size(max = 64) in raw form but full
+        // upper-casing expands it to 128 characters; the service must reject it
+        // before any database interaction.
+        String rawSku = "\u00DF".repeat(64);
+        CreateProductRequest request = new CreateProductRequest(
+                rawSku, "Hex bolt M8", "M8x30", new BigDecimal("12.50"), 100);
+
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOf(InvalidSkuException.class)
+                .hasMessage("Product with SKU '" + rawSku
+                        + "' normalizes to 128 characters, exceeding the maximum of 64");
+
+        verify(repository, never()).existsBySku(any());
+        verify(repository, never()).saveAndFlush(any(Product.class));
+    }
+
+    @Test
     void constructorRejectsBlankOrNullCurrency() {
         assertThatThrownBy(() -> new ProductService(repository, "   "))
                 .isInstanceOf(IllegalArgumentException.class)

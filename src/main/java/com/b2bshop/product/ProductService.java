@@ -40,6 +40,14 @@ public class ProductService {
     @Transactional
     public ProductResponse create(CreateProductRequest request) {
         String sku = normalizeSku(request.sku());
+        // Upper-casing is not length-preserving for all Unicode input (e.g. "ß" -> "SS"),
+        // so the normalized form is checked against the column limit before it
+        // reaches the database constraint. Length is counted in UTF-16 units (the
+        // same metric as @Size), which is at least as strict as the column's
+        // character count.
+        if (sku.length() > CreateProductRequest.SKU_MAX_LENGTH) {
+            throw new InvalidSkuException(request.sku(), sku.length());
+        }
         if (repository.existsBySku(sku)) {
             throw new DuplicateSkuException(sku);
         }

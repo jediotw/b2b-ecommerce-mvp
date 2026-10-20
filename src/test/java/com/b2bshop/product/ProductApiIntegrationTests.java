@@ -192,6 +192,102 @@ class ProductApiIntegrationTests {
     }
 
     @Test
+    void createProductRejectsSkuThatExceedsNormalizedLengthLimit() throws Exception {
+        // "ß" (U+00DF) passes @Size(max = 64) before normalization, but Locale.ROOT
+        // upper-casing expands it to "SS": a 64-character input normalizes to 128
+        // characters. Escaped as JSON \u00DF to keep the request body ASCII.
+        String rawSku = "\\u00DF".repeat(64);
+        String decodedSku = "\u00DF".repeat(64);
+        mockMvc.perform(post("/api/v1/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sku":"%s","name":"Bolt","price":1.00,"stockQuantity":5}
+                                """.formatted(rawSku)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.instance").value("/api/v1/products"))
+                .andExpect(jsonPath("$.detail").value("Product with SKU '" + decodedSku
+                        + "' normalizes to 128 characters, exceeding the maximum of 64"));
+
+        Integer rows = jdbcTemplate.queryForObject("select count(*) from products", Integer.class);
+        assertThat(rows).isZero();
+    }
+
+    @Test
+    void createProductAcceptsSkuThatReachesNormalizedLengthLimit() throws Exception {
+        // 32 raw "ß" characters normalize to "SS" x 32, exactly 64 characters,
+        // which must still be accepted and stored.
+        String rawSku = "\\u00DF".repeat(32);
+        String normalizedSku = "SS".repeat(32);
+        mockMvc.perform(post("/api/v1/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sku":"%s","name":"Bolt","price":1.00,"stockQuantity":5}
+                                """.formatted(rawSku)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sku").value(normalizedSku));
+
+        String storedSku = jdbcTemplate.queryForObject(
+                "select sku from products where sku = ?", String.class, normalizedSku);
+        assertThat(storedSku).isEqualTo(normalizedSku).hasSize(64);
+    }
+
+    @Test
+    void createProductRejectsSkuWithNulCharacter() throws Exception {
+        // U+0000 (JSON \u0000) passes @NotBlank/@Size but PostgreSQL cannot store
+        // it: the request must be rejected at validation with a 400, not a 500.
+        mockMvc.perform(post("/api/v1/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sku":"A\\u0000B","name":"Bolt","price":1.00,"stockQuantity":5}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.errors.sku").value("must not contain control characters"));
+
+        Integer rows = jdbcTemplate.queryForObject("select count(*) from products", Integer.class);
+        assertThat(rows).isZero();
+    }
+
+    @Test
+    void createProductRejectsNulOnlySku() throws Exception {
+        // Without a control-character rule this SKU passes validation, is trimmed
+        // to an empty string and silently stored as "" with a 201 response.
+        mockMvc.perform(post("/api/v1/products")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sku":"\\u0000","name":"Bolt","price":1.00,"stockQuantity":5}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.sku").value("must not contain control characters"));
+
+        Integer rows = jdbcTemplate.queryForObject("select count(*) from products", Integer.class);
+        assertThat(rows).isZero();
+    }
+
+    @Test
+    void createProductRejectsSkuWithOtherControlCharacters() throws Exception {
+        // Control characters anywhere in the raw input are rejected: leading C0
+        // (trim would silently remove it), trailing C0/DEL, and both C1
+        // boundaries. The pattern is anchored, so position does not matter.
+        List<String> escapedSkus = List.of(
+                "\\u0000SKU-1", "SKU-2\\u0009", "SKU-3\\u001F", "SKU-4\\u007F", "SKU-5\\u0085", "SKU-6\\u009F");
+        for (String escapedSku : escapedSkus) {
+            mockMvc.perform(post("/api/v1/products")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"sku":"%s","name":"Bolt","price":1.00,"stockQuantity":5}
+                                    """.formatted(escapedSku)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.errors.sku").value("must not contain control characters"));
+        }
+
+        Integer rows = jdbcTemplate.queryForObject("select count(*) from products", Integer.class);
+        assertThat(rows).isZero();
+    }
+
+    @Test
     void getProductReturnsProduct() throws Exception {
         ProductResponse created = productService.create(
                 new CreateProductRequest("SKU-400", "Nut M8", null, new BigDecimal("3.25"), 25));
@@ -342,6 +438,12 @@ class ProductApiIntegrationTests {
                 """, String.class);
         assertThat(columns)
                 .containsExactly("id", "sku", "name", "description", "price", "stock_quantity", "created_at");
+
+        Integer skuMaxLength = jdbcTemplate.queryForObject("""
+                select character_maximum_length from information_schema.columns
+                where table_schema = 'public' and table_name = 'products' and column_name = 'sku'
+                """, Integer.class);
+        assertThat(skuMaxLength).isEqualTo(CreateProductRequest.SKU_MAX_LENGTH);
 
         List<String> constraints = jdbcTemplate.queryForList("""
                 select conname from pg_constraint where conrelid = 'products'::regclass order by conname

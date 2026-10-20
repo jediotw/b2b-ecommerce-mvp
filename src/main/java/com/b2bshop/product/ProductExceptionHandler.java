@@ -44,6 +44,11 @@ public class ProductExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.CONFLICT, ex.getMessage(), request, null);
     }
 
+    @ExceptionHandler(InvalidSkuException.class)
+    ResponseEntity<Object> handleInvalidSku(InvalidSkuException ex, WebRequest request) {
+        return problem(HttpStatus.BAD_REQUEST, ex.getMessage(), request, null);
+    }
+
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex,
             HttpHeaders headers, HttpStatusCode status, WebRequest request) {
